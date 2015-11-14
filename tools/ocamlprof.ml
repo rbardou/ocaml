@@ -164,6 +164,9 @@ and rewrite_cases iflag l =
 and rewrite_labelexp_list iflag l =
   rewrite_exp_list iflag (List.map snd l)
 
+and rewrite_labellistexp_list iflag l =
+  rewrite_exp_list iflag (List.map snd l)
+
 and rewrite_exp_list iflag l =
   List.iter (rewrite_exp iflag) l
 
@@ -222,11 +225,11 @@ and rw_exp iflag sexp =
   | Pexp_variant(_, Some sarg) ->
     rewrite_exp iflag sarg
 
-  | Pexp_record(lid_sexp_list, None) ->
+  | Pexp_record lid_sexp_list ->
     rewrite_labelexp_list iflag lid_sexp_list
-  | Pexp_record(lid_sexp_list, Some sexp) ->
+  | Pexp_record_with(sexp, lidl_sexp_list) ->
     rewrite_exp iflag sexp;
-    rewrite_labelexp_list iflag lid_sexp_list
+    rewrite_labellistexp_list iflag lidl_sexp_list
 
   | Pexp_field(sarg, _) ->
     rewrite_exp iflag sarg

@@ -230,6 +230,16 @@ let lapply p1 p2 =
 let exp_of_label lbl pos =
   mkexp (Pexp_ident(mkrhs (Lident(Longident.last lbl)) pos))
 
+let exp_of_deep_label (first_label, other_labels) =
+  let rec last = function
+    | [] -> first_label
+    | [ label ] -> label
+    | _ :: tl -> last tl
+  in
+  let last_label = last other_labels in
+  mkexp
+    (Pexp_ident (mkloc (Lident (Longident.last last_label.txt)) last_label.loc))
+
 let pat_of_label lbl pos =
   mkpat (Ppat_var (mkrhs (Longident.last lbl) pos))
 
@@ -1402,16 +1412,24 @@ simple_expr:
       { bigarray_get $1 $4 }
   | simple_expr DOT LBRACE expr_comma_list error
       { unclosed "{" 3 "}" 5 }
-  | LBRACE record_expr RBRACE
-      { let (exten, fields) = $2 in mkexp (Pexp_record(fields, exten)) }
-  | LBRACE record_expr error
+  | LBRACE lbl_expr_list RBRACE
+      { mkexp (Pexp_record $2) }
+  | LBRACE lbl_expr_list error
       { unclosed "{" 1 "}" 3 }
-  | mod_longident DOT LBRACE record_expr RBRACE
-      { let (exten, fields) = $4 in
-        let rec_exp = mkexp(Pexp_record(fields, exten)) in
+  | LBRACE simple_expr WITH deep_lbl_expr_list RBRACE
+      { mkexp (Pexp_record_with ($2, $4)) }
+  | LBRACE simple_expr WITH deep_lbl_expr_list error
+      { unclosed "{" 1 "}" 5 }
+  | mod_longident DOT LBRACE lbl_expr_list RBRACE
+      { let rec_exp = mkexp(Pexp_record $4) in
         mkexp(Pexp_open(Fresh, mkrhs $1 1, rec_exp)) }
-  | mod_longident DOT LBRACE record_expr error
+  | mod_longident DOT LBRACE lbl_expr_list error
       { unclosed "{" 3 "}" 5 }
+  | mod_longident DOT LBRACE simple_expr WITH deep_lbl_expr_list RBRACE
+      { let rec_exp = mkexp(Pexp_record_with($4, $6)) in
+        mkexp(Pexp_open(Fresh, mkrhs $1 1, rec_exp)) }
+  | mod_longident DOT LBRACE simple_expr WITH deep_lbl_expr_list error
+      { unclosed "{" 3 "}" 7 }
   | LBRACKETBAR expr_semi_list opt_semi BARRBRACKET
       { mkexp (Pexp_array(List.rev $2)) }
   | LBRACKETBAR expr_semi_list opt_semi error
@@ -1572,10 +1590,6 @@ expr_comma_list:
     expr_comma_list COMMA expr                  { $3 :: $1 }
   | expr COMMA expr                             { [$3; $1] }
 ;
-record_expr:
-    simple_expr WITH lbl_expr_list              { (Some $1, $3) }
-  | lbl_expr_list                               { (None, $1) }
-;
 lbl_expr_list:
      lbl_expr { [$1] }
   |  lbl_expr SEMI lbl_expr_list { $1 :: $3 }
@@ -1586,6 +1600,24 @@ lbl_expr:
       { (mkrhs $1 1, mkexp_opt_constraint $4 $2) }
   | label_longident opt_type_constraint
       { (mkrhs $1 1, mkexp_opt_constraint (exp_of_label $1 1) $2) }
+;
+deep_lbl_expr_list:
+     deep_lbl_expr { [$1] }
+  |  deep_lbl_expr SEMI deep_lbl_expr_list { $1 :: $3 }
+  |  deep_lbl_expr SEMI { [$1] }
+;
+deep_lbl_expr:
+    deep_label_longident opt_type_constraint EQUAL expr
+      { ($1, mkexp_opt_constraint $4 $2) }
+  | deep_label_longident opt_type_constraint
+      { ($1, mkexp_opt_constraint (exp_of_deep_label $1) $2) }
+;
+deep_label_longident:
+    label_longident
+      { mkrhs $1 1, [] }
+  | label_longident DOT deep_label_longident
+      { let hd, tl = $3 in
+        mkrhs $1 1, hd :: tl }
 ;
 field_expr_list:
     field_expr opt_semi { [$1] }

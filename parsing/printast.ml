@@ -279,10 +279,13 @@ and expression i ppf x =
   | Pexp_variant (l, eo) ->
       line i ppf "Pexp_variant \"%s\"\n" l;
       option i expression ppf eo;
-  | Pexp_record (l, eo) ->
+  | Pexp_record l ->
       line i ppf "Pexp_record\n";
       list i longident_x_expression ppf l;
-      option i expression ppf eo;
+  | Pexp_record_with (e, l) ->
+      line i ppf "Pexp_record_with\n";
+      expression i ppf e;
+      list i longident_non_empty_list_x_expression ppf l;
   | Pexp_field (e, li) ->
       line i ppf "Pexp_field\n";
       expression i ppf e;
@@ -856,6 +859,11 @@ and string_x_expression i ppf (s, e) =
 
 and longident_x_expression i ppf (li, e) =
   line i ppf "%a\n" fmt_longident_loc li;
+  expression (i+1) ppf e;
+
+and longident_non_empty_list_x_expression i ppf ((li_hd, li_tl), e) =
+  line i ppf "%a\n" fmt_longident_loc li_hd;
+  list i (fun _index -> fmt_longident_loc) ppf li_tl;
   expression (i+1) ppf e;
 
 and label_x_expression i ppf (l,e) =

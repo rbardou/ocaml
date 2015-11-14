@@ -93,7 +93,16 @@ module Exp = struct
   let tuple ?loc ?attrs a = mk ?loc ?attrs (Pexp_tuple a)
   let construct ?loc ?attrs a b = mk ?loc ?attrs (Pexp_construct (a, b))
   let variant ?loc ?attrs a b = mk ?loc ?attrs (Pexp_variant (a, b))
-  let record ?loc ?attrs a b = mk ?loc ?attrs (Pexp_record (a, b))
+  let record ?loc ?attrs fields expr =
+    (* We are keeping the same interface as before deep labels where
+       introduced. To use deep labels, use record_with instead. *)
+    match expr with
+    | None ->
+        mk ?loc ?attrs (Pexp_record fields)
+    | Some expr ->
+        let fields = List.map (fun (field, expr) -> (field, []), expr) fields in
+        mk ?loc ?attrs (Pexp_record_with (expr, fields))
+  let record_with ?loc ?attrs a b = mk ?loc ?attrs (Pexp_record_with (a, b))
   let field ?loc ?attrs a b = mk ?loc ?attrs (Pexp_field (a, b))
   let setfield ?loc ?attrs a b c = mk ?loc ?attrs (Pexp_setfield (a, b, c))
   let array ?loc ?attrs a = mk ?loc ?attrs (Pexp_array a)

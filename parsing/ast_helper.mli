@@ -110,6 +110,10 @@ module Exp:
                  -> expression
     val record: ?loc:loc -> ?attrs:attrs -> (lid * expression) list
                 -> expression option -> expression
+    val record_with: ?loc:loc -> ?attrs:attrs
+                -> expression
+                -> ((lid * lid list) * expression) list
+                -> expression
     val field: ?loc:loc -> ?attrs:attrs -> expression -> lid -> expression
     val setfield: ?loc:loc -> ?attrs:attrs -> expression -> lid -> expression
                   -> expression

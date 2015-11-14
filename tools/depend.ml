@@ -167,9 +167,16 @@ let rec add_expr bv exp =
   | Pexp_tuple el -> List.iter (add_expr bv) el
   | Pexp_construct(c, opte) -> add bv c; add_opt add_expr bv opte
   | Pexp_variant(_, opte) -> add_opt add_expr bv opte
-  | Pexp_record(lblel, opte) ->
-      List.iter (fun (lbl, e) -> add bv lbl; add_expr bv e) lblel;
-      add_opt add_expr bv opte
+  | Pexp_record lblel ->
+      List.iter (fun (lbl, e) -> add bv lbl; add_expr bv e) lblel
+  | Pexp_record_with (e, lbllel) ->
+      List.iter
+        (fun ((lbl, lbll), e) ->
+           add bv lbl;
+           List.iter (add bv) lbll;
+           add_expr bv e)
+        lbllel;
+      add_expr bv e
   | Pexp_field(e, fld) -> add_expr bv e; add bv fld
   | Pexp_setfield(e1, fld, e2) -> add_expr bv e1; add bv fld; add_expr bv e2
   | Pexp_array el -> List.iter (add_expr bv) el

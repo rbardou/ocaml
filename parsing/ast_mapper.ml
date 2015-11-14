@@ -334,9 +334,17 @@ module E = struct
         construct ~loc ~attrs (map_loc sub lid) (map_opt (sub.expr sub) arg)
     | Pexp_variant (lab, eo) ->
         variant ~loc ~attrs lab (map_opt (sub.expr sub) eo)
-    | Pexp_record (l, eo) ->
+    | Pexp_record l ->
         record ~loc ~attrs (List.map (map_tuple (map_loc sub) (sub.expr sub)) l)
-          (map_opt (sub.expr sub) eo)
+          None
+    | Pexp_record_with (e, l) ->
+        record_with ~loc ~attrs
+          (sub.expr sub e)
+          (List.map
+             (map_tuple
+                (map_tuple (map_loc sub) (List.map (map_loc sub)))
+                (sub.expr sub))
+             l)
     | Pexp_field (e, lid) ->
         field ~loc ~attrs (sub.expr sub e) (map_loc sub lid)
     | Pexp_setfield (e1, lid, e2) ->
@@ -706,8 +714,7 @@ module PpxContext = struct
     mk fields
 
   let get_fields = function
-    | PStr [{pstr_desc = Pstr_eval
-                 ({ pexp_desc = Pexp_record (fields, None) }, [])}] ->
+    | PStr [{pstr_desc = Pstr_eval ({ pexp_desc = Pexp_record fields }, [])}] ->
         fields
     | _ ->
         raise_errorf "Internal error: invalid [@@@ocaml.ppx.context] syntax"

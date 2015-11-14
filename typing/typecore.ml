@@ -148,8 +148,10 @@ let iter_expression f e =
     | Pexp_tuple el -> List.iter expr el
     | Pexp_construct (_, eo)
     | Pexp_variant (_, eo) -> may expr eo
-    | Pexp_record (iel, eo) ->
-        may expr eo; List.iter (fun (_, e) -> expr e) iel
+    | Pexp_record iel ->
+        List.iter (fun (_, e) -> expr e) iel
+    | Pexp_record_with (e, iel) ->
+        expr e; List.iter (fun (_, e) -> expr e) iel
     | Pexp_open (_, _, e)
     | Pexp_newtype (_, e)
     | Pexp_poly (e, _)
@@ -1878,6 +1880,115 @@ and type_expect_ ?in_function ?(recarg=Rejected) env sexp ty_expected =
     unify_exp env (re exp) (instance env ty_expected);
     exp
   in
+  let type_record lid_sexp_list opt_sexp =
+    if lid_sexp_list = [] then
+      Syntaxerr.ill_formed_ast loc "Records cannot be empty.";
+    let opt_exp =
+      match opt_sexp with
+        None -> None
+      | Some sexp ->
+          if !Clflags.principal then begin_def ();
+          let exp = type_exp ~recarg env sexp in
+          if !Clflags.principal then begin
+            end_def ();
+            generalize_structure exp.exp_type
+          end;
+          Some exp
+    in
+    let ty_record, opath =
+      let get_path ty =
+        try
+          let (p0, p,_) = extract_concrete_record env ty in
+          (* XXX level may be wrong *)
+          Some (p0, p, ty.level = generic_level || not !Clflags.principal)
+        with Not_found -> None
+      in
+      match get_path ty_expected with
+        None ->
+          begin match opt_exp with
+            None -> newvar (), None
+          | Some exp ->
+              match get_path exp.exp_type with
+                None -> newvar (), None
+              | Some (_, p', _) as op ->
+                  let decl = Env.find_type p' env in
+                  begin_def ();
+                  let ty =
+                    newconstr p' (instance_list env decl.type_params) in
+                  end_def ();
+                  generalize_structure ty;
+                  ty, op
+          end
+      | op -> ty_expected, op
+    in
+    let closed = (opt_sexp = None) in
+    let lbl_exp_list =
+      wrap_disambiguate "This record expression is expected to have" ty_record
+        (type_label_a_list loc closed env
+           (fun e k -> k (type_label_exp true env loc ty_record e))
+           opath lid_sexp_list)
+        (fun x -> x)
+    in
+    unify_exp_types loc env ty_record (instance env ty_expected);
+
+    (* type_label_a_list returns a list of labels sorted by lbl_pos *)
+    (* note: check_duplicates would better be implemented in
+       type_label_a_list directly *)
+    let rec check_duplicates = function
+      | (_, lbl1, _) :: (_, lbl2, _) :: _ when lbl1.lbl_pos = lbl2.lbl_pos ->
+          raise(Error(loc, env, Label_multiply_defined lbl1.lbl_name))
+      | _ :: rem ->
+          check_duplicates rem
+      | [] -> ()
+    in
+    check_duplicates lbl_exp_list;
+    let opt_exp =
+      match opt_exp, lbl_exp_list with
+        None, _ -> None
+      | Some exp, (lid, lbl, lbl_exp) :: _ ->
+          let ty_exp = instance env exp.exp_type in
+          let unify_kept lbl =
+            (* do not connect overridden labels *)
+            if List.for_all
+                (fun (_, lbl',_) -> lbl'.lbl_pos <> lbl.lbl_pos)
+                lbl_exp_list
+            then begin
+              let _, ty_arg1, ty_res1 = instance_label false lbl
+              and _, ty_arg2, ty_res2 = instance_label false lbl in
+              unify env ty_arg1 ty_arg2;
+              unify env (instance env ty_expected) ty_res2;
+              unify_exp_types exp.exp_loc env ty_exp ty_res1;
+            end in
+          Array.iter unify_kept lbl.lbl_all;
+          Some {exp with exp_type = ty_exp}
+      | _ -> assert false
+    in
+    let num_fields =
+      match lbl_exp_list with
+        [] -> assert false
+      | (_, lbl,_)::_ -> Array.length lbl.lbl_all in
+    if opt_sexp = None && List.length lid_sexp_list <> num_fields then begin
+      let present_indices =
+        List.map (fun (_, lbl, _) -> lbl.lbl_pos) lbl_exp_list in
+      let label_names = extract_label_names sexp env ty_expected in
+      let rec missing_labels n = function
+          [] -> []
+        | lbl :: rem ->
+            if List.mem n present_indices then missing_labels (n + 1) rem
+            else lbl :: missing_labels (n + 1) rem
+      in
+      let missing = missing_labels 0 label_names in
+      raise(Error(loc, env, Label_missing missing))
+    end
+    else if opt_sexp <> None && List.length lid_sexp_list = num_fields then
+      Location.prerr_warning loc Warnings.Useless_record_with;
+    re {
+      exp_desc = Texp_record(lbl_exp_list, opt_exp);
+      exp_loc = loc; exp_extra = [];
+      exp_type = instance env ty_expected;
+      exp_attributes = sexp.pexp_attributes;
+      exp_env = env }
+  in
   match sexp.pexp_desc with
   | Pexp_ident lid ->
       begin
@@ -2142,113 +2253,12 @@ and type_expect_ ?in_function ?(recarg=Rejected) env sexp ty_expected =
           exp_attributes = sexp.pexp_attributes;
           exp_env = env }
       end
-  | Pexp_record(lid_sexp_list, opt_sexp) ->
-      if lid_sexp_list = [] then
-        Syntaxerr.ill_formed_ast loc "Records cannot be empty.";
-      let opt_exp =
-        match opt_sexp with
-          None -> None
-        | Some sexp ->
-            if !Clflags.principal then begin_def ();
-            let exp = type_exp ~recarg env sexp in
-            if !Clflags.principal then begin
-              end_def ();
-              generalize_structure exp.exp_type
-            end;
-            Some exp
-      in
-      let ty_record, opath =
-        let get_path ty =
-          try
-            let (p0, p,_) = extract_concrete_record env ty in
-            (* XXX level may be wrong *)
-            Some (p0, p, ty.level = generic_level || not !Clflags.principal)
-          with Not_found -> None
-        in
-        match get_path ty_expected with
-          None ->
-            begin match opt_exp with
-              None -> newvar (), None
-            | Some exp ->
-                match get_path exp.exp_type with
-                  None -> newvar (), None
-                | Some (_, p', _) as op ->
-                    let decl = Env.find_type p' env in
-                    begin_def ();
-                    let ty =
-                      newconstr p' (instance_list env decl.type_params) in
-                    end_def ();
-                    generalize_structure ty;
-                    ty, op
-            end
-        | op -> ty_expected, op
-      in
-      let closed = (opt_sexp = None) in
-      let lbl_exp_list =
-        wrap_disambiguate "This record expression is expected to have" ty_record
-          (type_label_a_list loc closed env
-             (fun e k -> k (type_label_exp true env loc ty_record e))
-             opath lid_sexp_list)
-          (fun x -> x)
-      in
-      unify_exp_types loc env ty_record (instance env ty_expected);
-
-      (* type_label_a_list returns a list of labels sorted by lbl_pos *)
-      (* note: check_duplicates would better be implemented in
-         type_label_a_list directly *)
-      let rec check_duplicates = function
-        | (_, lbl1, _) :: (_, lbl2, _) :: _ when lbl1.lbl_pos = lbl2.lbl_pos ->
-          raise(Error(loc, env, Label_multiply_defined lbl1.lbl_name))
-        | _ :: rem ->
-            check_duplicates rem
-        | [] -> ()
-      in
-      check_duplicates lbl_exp_list;
-      let opt_exp =
-        match opt_exp, lbl_exp_list with
-          None, _ -> None
-        | Some exp, (lid, lbl, lbl_exp) :: _ ->
-            let ty_exp = instance env exp.exp_type in
-            let unify_kept lbl =
-              (* do not connect overridden labels *)
-              if List.for_all
-                  (fun (_, lbl',_) -> lbl'.lbl_pos <> lbl.lbl_pos)
-                  lbl_exp_list
-              then begin
-                let _, ty_arg1, ty_res1 = instance_label false lbl
-                and _, ty_arg2, ty_res2 = instance_label false lbl in
-                unify env ty_arg1 ty_arg2;
-                unify env (instance env ty_expected) ty_res2;
-                unify_exp_types exp.exp_loc env ty_exp ty_res1;
-              end in
-            Array.iter unify_kept lbl.lbl_all;
-            Some {exp with exp_type = ty_exp}
-        | _ -> assert false
-      in
-      let num_fields =
-        match lbl_exp_list with [] -> assert false
-        | (_, lbl,_)::_ -> Array.length lbl.lbl_all in
-      if opt_sexp = None && List.length lid_sexp_list <> num_fields then begin
-        let present_indices =
-          List.map (fun (_, lbl, _) -> lbl.lbl_pos) lbl_exp_list in
-        let label_names = extract_label_names sexp env ty_expected in
-        let rec missing_labels n = function
-            [] -> []
-          | lbl :: rem ->
-              if List.mem n present_indices then missing_labels (n + 1) rem
-              else lbl :: missing_labels (n + 1) rem
-        in
-        let missing = missing_labels 0 label_names in
-        raise(Error(loc, env, Label_missing missing))
-      end
-      else if opt_sexp <> None && List.length lid_sexp_list = num_fields then
-        Location.prerr_warning loc Warnings.Useless_record_with;
-      re {
-        exp_desc = Texp_record(lbl_exp_list, opt_exp);
-        exp_loc = loc; exp_extra = [];
-        exp_type = instance env ty_expected;
-        exp_attributes = sexp.pexp_attributes;
-        exp_env = env }
+  | Pexp_record lid_sexp_list ->
+      type_record lid_sexp_list None
+  | Pexp_record_with (sexp, lidl_sexp_list) ->
+      (* Temporary, for testing. TODO *)
+      let lid_sexp_list = List.map (fun ((li, _), e) -> li, e) lidl_sexp_list in
+      type_record lid_sexp_list (Some sexp)
   | Pexp_field(srecord, lid) ->
       let (record, label, _) = type_label_access env loc srecord lid in
       let (_, ty_arg, ty_res) = instance_label false label in
@@ -3559,7 +3569,8 @@ and type_construct env loc lid sarg ty_expected attrs =
         begin match sargs with
         | [{pexp_desc =
               Pexp_ident _ |
-              Pexp_record (_, (Some {pexp_desc = Pexp_ident _}| None))}] ->
+              Pexp_record _ |
+              Pexp_record_with ({pexp_desc = Pexp_ident _}, _)}] ->
             Required
         | _ ->
             raise (Error(loc, env, Inlined_record_escape))

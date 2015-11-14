@@ -398,11 +398,17 @@ let expression sub exp =
           ))
     | Texp_variant (label, expo) ->
         Pexp_variant (label, map_opt (sub.expr sub) expo)
-    | Texp_record (list, expo) ->
-        Pexp_record (List.map (fun (lid, _, exp) ->
-              (map_loc sub lid, sub.expr sub exp)
-          ) list,
-          map_opt (sub.expr sub) expo)
+    | Texp_record (list, None) ->
+        Pexp_record
+          (List.map
+             (fun (lid, _, exp) -> (map_loc sub lid, sub.expr sub exp))
+             list)
+    | Texp_record (list, Some exp) ->
+        Pexp_record_with
+          (sub.expr sub exp,
+           List.map
+             (fun (lid, _, exp) -> ((map_loc sub lid, []), sub.expr sub exp))
+             list)
     | Texp_field (exp, lid, _label) ->
         Pexp_field (sub.expr sub exp, map_loc sub lid)
     | Texp_setfield (exp1, lid, _label, exp2) ->

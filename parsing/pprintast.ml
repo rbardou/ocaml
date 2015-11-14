@@ -649,7 +649,7 @@ class printer  ()= object(self:'self)
           cto1 (* no sep hint*)
           self#core_type ct
     | Pexp_variant (l, None) -> pp f "`%s" l
-    | Pexp_record (l, eo) ->
+    | Pexp_record l ->
         let longident_x_expression f ( li, e) =
           match e.pexp_desc with
           |  Pexp_ident {txt;_} when li.txt = txt ->
@@ -658,9 +658,30 @@ class printer  ()= object(self:'self)
               pp f "@[<hov2>%a@;=@;%a@]" self#longident_loc li self#simple_expr
                  e
         in
-        pp f "@[<hv0>@[<hv2>{@;%a%a@]@;}@]"(* "@[<hov2>{%a%a}@]" *)
-          (self#option ~last:" with@;" self#simple_expr) eo
+        pp f "@[<hv0>@[<hv2>{@;%a@]@;}@]"(* "@[<hov2>{%a%a}@]" *)
           (self#list longident_x_expression ~sep:";@;")  l
+    | Pexp_record_with (e, l) ->
+        let longident_non_empty_list_x_expression f ( (li_hd, li_tl), e) =
+          (* Print all labels except the last one. Return the last one. *)
+          let rec print_all_but_last previous = function
+            | [] ->
+                previous
+            | hd :: tl ->
+                pp f "%a.@," self#longident_loc previous;
+                print_all_but_last hd tl
+          in
+          let li = print_all_but_last li_hd li_tl in
+          (* Now act like Pexp_record. *)
+          match e.pexp_desc with
+          |  Pexp_ident {txt;_} when li.txt = txt ->
+              pp f "@[<hov2>%a@]" self#longident_loc li
+          | _ ->
+              pp f "@[<hov2>%a@;=@;%a@]" self#longident_loc li self#simple_expr
+                 e
+        in
+        pp f "@[<hv0>@[<hv2>{@;%a with@;%a@]@;}@]"(* "@[<hov2>{%a%a}@]" *)
+          self#simple_expr e
+          (self#list longident_non_empty_list_x_expression ~sep:";@;")  l
     | Pexp_array (l) ->
         pp f "@[<0>@[<2>[|%a|]@]@]"
           (self#list self#under_semi#simple_expr ~sep:";") l
