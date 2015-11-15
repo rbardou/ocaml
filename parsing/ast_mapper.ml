@@ -335,7 +335,8 @@ module E = struct
     | Pexp_variant (lab, eo) ->
         variant ~loc ~attrs lab (map_opt (sub.expr sub) eo)
     | Pexp_record (l, eo) ->
-        record ~loc ~attrs (List.map (map_tuple (map_loc sub) (sub.expr sub)) l)
+        record_deep ~loc ~attrs
+          (List.map (map_tuple (List.map (map_loc sub)) (sub.expr sub)) l)
           (map_opt (sub.expr sub) eo)
     | Pexp_field (e, lid) ->
         field ~loc ~attrs (sub.expr sub e) (map_loc sub lid)
@@ -683,23 +684,23 @@ module PpxContext = struct
     | None   -> Exp.construct (lid "None") None
 
   let get_cookies () =
-    lid "cookies",
+    [lid "cookies"],
     make_list (make_pair make_string (fun x -> x))
       (StringMap.bindings !cookies)
 
   let mk fields =
     { txt = "ocaml.ppx.context"; loc = Location.none },
-    Parsetree.PStr [Str.eval (Exp.record fields None)]
+    Parsetree.PStr [Str.eval (Exp.record_deep fields None)]
 
   let make ~tool_name () =
     let fields =
       [
-        lid "tool_name",    make_string tool_name;
-        lid "include_dirs", make_list make_string !Clflags.include_dirs;
-        lid "load_path",    make_list make_string !Config.load_path;
-        lid "open_modules", make_list make_string !Clflags.open_modules;
-        lid "for_package",  make_option make_string !Clflags.for_package;
-        lid "debug",        make_bool !Clflags.debug;
+        [lid "tool_name"],    make_string tool_name;
+        [lid "include_dirs"], make_list make_string !Clflags.include_dirs;
+        [lid "load_path"],    make_list make_string !Config.load_path;
+        [lid "open_modules"], make_list make_string !Clflags.open_modules;
+        [lid "for_package"],  make_option make_string !Clflags.for_package;
+        [lid "debug"],        make_bool !Clflags.debug;
         get_cookies ()
       ]
     in
@@ -775,12 +776,14 @@ module PpxContext = struct
       | _ ->
           ()
     in
-    List.iter (function ({txt=Lident name}, x) -> field name x | _ -> ()) fields
+    List.iter
+      (function ([{txt=Lident name}], x) -> field name x | _ -> ())
+      fields
 
   let update_cookies fields =
     let fields =
       List.filter
-        (function ({txt=Lident "cookies"}, _) -> false | _ -> true)
+        (function ([{txt=Lident "cookies"}], _) -> false | _ -> true)
         fields
     in
     fields @ [get_cookies ()]

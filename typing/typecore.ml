@@ -2142,9 +2142,11 @@ and type_expect_ ?in_function ?(recarg=Rejected) env sexp ty_expected =
           exp_attributes = sexp.pexp_attributes;
           exp_env = env }
       end
-  | Pexp_record(lid_sexp_list, opt_sexp) ->
-      if lid_sexp_list = [] then
+  | Pexp_record(lidl_sexp_list, opt_sexp) ->
+      (* Check non-emptiness. *)
+      if lidl_sexp_list = [] then
         Syntaxerr.ill_formed_ast loc "Records cannot be empty.";
+      (* Type the expression before the "with". *)
       let opt_exp =
         match opt_sexp with
           None -> None
@@ -2157,6 +2159,8 @@ and type_expect_ ?in_function ?(recarg=Rejected) env sexp ty_expected =
             end;
             Some exp
       in
+      (* Try to find the record type and path from the expected type.
+         Else, try to find it from the extended expression, if any. *)
       let ty_record, opath =
         let get_path ty =
           try
@@ -2183,14 +2187,50 @@ and type_expect_ ?in_function ?(recarg=Rejected) env sexp ty_expected =
             end
         | op -> ty_expected, op
       in
+      (* Type labels and their expression. *)
       let closed = (opt_sexp = None) in
+      let expand_deep_label lid other_lids exp =
+        match other_lids with
+        | [] ->
+            exp
+        | hd :: _ ->
+            let opt_sexp =
+              match opt_sexp with
+              | None ->
+                  None
+              | Some sexp ->
+                  let sexp =
+                    Ast_helper.Exp.field ~loc: sexp.pexp_loc sexp lid
+                  in
+                  Some sexp
+            in
+            let loc =
+              { exp.pexp_loc with
+                Location.loc_start = hd.loc.Location.loc_start }
+            in
+            Ast_helper.Exp.record_deep ~loc [ other_lids, exp ] opt_sexp
+      in
       let lbl_exp_list =
+        let lid_lidlexp_list =
+          List.map
+            (fun (labels, exp) -> List.hd labels, (List.tl labels, exp))
+            lidl_sexp_list
+        in
         wrap_disambiguate "This record expression is expected to have" ty_record
           (type_label_a_list loc closed env
-             (fun e k -> k (type_label_exp true env loc ty_record e))
-             opath lid_sexp_list)
+             (fun (lid, label, (other_lids, exp)) k ->
+                let exp = expand_deep_label lid other_lids exp in
+                k (type_label_exp true env loc ty_record (lid, label, exp)))
+             opath lid_lidlexp_list)
           (fun x -> x)
       in
+      (* TODO: merge duplicates if they are deep labels. *)
+      (* TODO: when merging, if all fields are available, remove the "with"
+         if it exists to avoid warning 23 for subrecords. *)
+      (* TODO: remember if the extended expression was used when expanding
+         deep labels, to be able to disable warning 23 if this is the case. *)
+
+      (* Unify the resulting record type with the expected type. *)
       unify_exp_types loc env ty_record (instance env ty_expected);
 
       (* type_label_a_list returns a list of labels sorted by lbl_pos *)
@@ -2225,10 +2265,12 @@ and type_expect_ ?in_function ?(recarg=Rejected) env sexp ty_expected =
             Some {exp with exp_type = ty_exp}
         | _ -> assert false
       in
+      (* Count the number of fields in the record type. *)
       let num_fields =
         match lbl_exp_list with [] -> assert false
         | (_, lbl,_)::_ -> Array.length lbl.lbl_all in
-      if opt_sexp = None && List.length lid_sexp_list <> num_fields then begin
+      (* If the record is closed, check for missing fields. *)
+      if opt_sexp = None && List.length lbl_exp_list <> num_fields then begin
         let present_indices =
           List.map (fun (_, lbl, _) -> lbl.lbl_pos) lbl_exp_list in
         let label_names = extract_label_names sexp env ty_expected in
@@ -2241,7 +2283,8 @@ and type_expect_ ?in_function ?(recarg=Rejected) env sexp ty_expected =
         let missing = missing_labels 0 label_names in
         raise(Error(loc, env, Label_missing missing))
       end
-      else if opt_sexp <> None && List.length lid_sexp_list = num_fields then
+      (* If the record is not closed, check that not all fields are present. *)
+      else if opt_sexp <> None && List.length lbl_exp_list = num_fields then
         Location.prerr_warning loc Warnings.Useless_record_with;
       re {
         exp_desc = Texp_record(lbl_exp_list, opt_exp);

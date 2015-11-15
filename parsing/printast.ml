@@ -281,7 +281,7 @@ and expression i ppf x =
       option i expression ppf eo;
   | Pexp_record (l, eo) ->
       line i ppf "Pexp_record\n";
-      list i longident_x_expression ppf l;
+      list i longidents_x_expression ppf l;
       option i expression ppf eo;
   | Pexp_field (e, li) ->
       line i ppf "Pexp_field\n";
@@ -854,8 +854,8 @@ and string_x_expression i ppf (s, e) =
   line i ppf "<override> %a\n" fmt_string_loc s;
   expression (i+1) ppf e;
 
-and longident_x_expression i ppf (li, e) =
-  line i ppf "%a\n" fmt_longident_loc li;
+and longidents_x_expression i ppf (li, e) =
+  list i longident_loc ppf li;
   expression (i+1) ppf e;
 
 and label_x_expression i ppf (l,e) =

@@ -108,7 +108,11 @@ module Exp:
                    -> expression
     val variant: ?loc:loc -> ?attrs:attrs -> label -> expression option
                  -> expression
+
+    (** [record] is a particular case of [record_deep]. *)
     val record: ?loc:loc -> ?attrs:attrs -> (lid * expression) list
+                -> expression option -> expression
+    val record_deep: ?loc:loc -> ?attrs:attrs -> (lid list * expression) list
                 -> expression option -> expression
     val field: ?loc:loc -> ?attrs:attrs -> expression -> lid -> expression
     val setfield: ?loc:loc -> ?attrs:attrs -> expression -> lid -> expression

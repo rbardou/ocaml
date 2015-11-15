@@ -230,6 +230,33 @@ let lapply p1 p2 =
 let exp_of_label lbl pos =
   mkexp (Pexp_ident(mkrhs (Lident(Longident.last lbl)) pos))
 
+(* Same as [exp_of_label] but for a non-empty label list. *)
+let exp_of_last_label (labels: Longident.t Location.loc list) =
+  let rec last = function
+    | [] -> invalid_arg "exp_of_last_label"
+    | [ x ] -> x
+    | _ :: tl -> last tl
+  in
+  let lbl = last labels in
+  mkexp (Pexp_ident(mkloc (Lident(Longident.last lbl.txt)) lbl.loc))
+
+(* Convert an expression which is expected to be of the form f.g.h... into
+   a sequence of field labels [f; g; h].
+
+   Deep labels are parsed as expressions to avoid some conflicts. *)
+let labels_of_exp (exp: expression): Longident.t Location.loc list =
+  let rec gather acc exp =
+    match exp.pexp_desc with
+    | Pexp_ident li ->
+        li :: acc
+    | Pexp_field (e, li) ->
+        gather (li :: acc) e
+    | _ ->
+        raise Syntaxerr.(
+            Error (Expecting (exp.pexp_loc, "dot-separated field list")))
+  in
+  gather [] exp
+
 let pat_of_label lbl pos =
   mkpat (Ppat_var (mkrhs (Longident.last lbl) pos))
 
@@ -1573,19 +1600,20 @@ expr_comma_list:
   | expr COMMA expr                             { [$3; $1] }
 ;
 record_expr:
-    simple_expr WITH lbl_expr_list              { (Some $1, $3) }
-  | lbl_expr_list                               { (None, $1) }
+    simple_expr WITH lbl_list_expr_list              { (Some $1, $3) }
+  | lbl_list_expr_list                               { (None, $1) }
 ;
-lbl_expr_list:
-     lbl_expr { [$1] }
-  |  lbl_expr SEMI lbl_expr_list { $1 :: $3 }
-  |  lbl_expr SEMI { [$1] }
+lbl_list_expr_list:
+    lbl_list_expr { [$1] }
+  | lbl_list_expr SEMI lbl_list_expr_list { $1 :: $3 }
+  | lbl_list_expr SEMI { [$1] }
 ;
-lbl_expr:
-    label_longident opt_type_constraint EQUAL expr
-      { (mkrhs $1 1, mkexp_opt_constraint $4 $2) }
-  | label_longident opt_type_constraint
-      { (mkrhs $1 1, mkexp_opt_constraint (exp_of_label $1 1) $2) }
+lbl_list_expr:
+    simple_expr opt_type_constraint EQUAL expr
+      { (labels_of_exp $1, mkexp_opt_constraint $4 $2) }
+  | simple_expr opt_type_constraint
+      { let labels = labels_of_exp $1 in
+        (labels, mkexp_opt_constraint (exp_of_last_label labels) $2) }
 ;
 field_expr_list:
     field_expr opt_semi { [$1] }

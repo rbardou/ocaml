@@ -255,11 +255,12 @@ and expression_desc =
         (* `A             (None)
            `A E           (Some E)
          *)
-  | Pexp_record of (Longident.t loc * expression) list * expression option
-        (* { l1=P1; ...; ln=Pn }     (None)
-           { E0 with l1=P1; ...; ln=Pn }   (Some E0)
+  | Pexp_record of (Longident.t loc list * expression) list * expression option
+        (* { L1=P1; ...; Ln=Pn }     (None)
+           { E0 with L1=P1; ...; Ln=Pn }   (Some E0)
+           Each Li is itself of the form: l1 . l2 . ... . lk
 
-           Invariant: n > 0
+           Invariant: n > 0, k > 0 (for all i)
          *)
   | Pexp_field of expression * Longident.t loc
         (* E.l *)

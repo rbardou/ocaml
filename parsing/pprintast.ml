@@ -650,17 +650,25 @@ class printer  ()= object(self:'self)
           self#core_type ct
     | Pexp_variant (l, None) -> pp f "`%s" l
     | Pexp_record (l, eo) ->
-        let longident_x_expression f ( li, e) =
+        let longidents_loc lil =
+          self#list self#longident_loc ~sep: ".@," lil
+        in
+        let longidents_x_expression f ( lil, e) =
+          let rec finishes_with ident = function
+            | [] -> false
+            | [ last ] -> last.txt = ident
+            | _ :: tl -> finishes_with ident tl
+          in
           match e.pexp_desc with
-          |  Pexp_ident {txt;_} when li.txt = txt ->
-              pp f "@[<hov2>%a@]" self#longident_loc li
+          |  Pexp_ident {txt;_} when finishes_with txt lil ->
+              pp f "@[<hov2>%a@]" longidents_loc lil
           | _ ->
-              pp f "@[<hov2>%a@;=@;%a@]" self#longident_loc li self#simple_expr
+              pp f "@[<hov2>%a@;=@;%a@]" longidents_loc lil self#simple_expr
                  e
         in
         pp f "@[<hv0>@[<hv2>{@;%a%a@]@;}@]"(* "@[<hov2>{%a%a}@]" *)
           (self#option ~last:" with@;" self#simple_expr) eo
-          (self#list longident_x_expression ~sep:";@;")  l
+          (self#list longidents_x_expression ~sep:";@;")  l
     | Pexp_array (l) ->
         pp f "@[<0>@[<2>[|%a|]@]@]"
           (self#list self#under_semi#simple_expr ~sep:";") l

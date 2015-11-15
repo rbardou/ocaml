@@ -93,7 +93,10 @@ module Exp = struct
   let tuple ?loc ?attrs a = mk ?loc ?attrs (Pexp_tuple a)
   let construct ?loc ?attrs a b = mk ?loc ?attrs (Pexp_construct (a, b))
   let variant ?loc ?attrs a b = mk ?loc ?attrs (Pexp_variant (a, b))
-  let record ?loc ?attrs a b = mk ?loc ?attrs (Pexp_record (a, b))
+  let record ?loc ?attrs labels exten =
+    let labels = List.map (fun (id, e) -> [ id ], e) labels in
+    mk ?loc ?attrs (Pexp_record (labels, exten))
+  let record_deep ?loc ?attrs a b = mk ?loc ?attrs (Pexp_record (a, b))
   let field ?loc ?attrs a b = mk ?loc ?attrs (Pexp_field (a, b))
   let setfield ?loc ?attrs a b c = mk ?loc ?attrs (Pexp_setfield (a, b, c))
   let array ?loc ?attrs a = mk ?loc ?attrs (Pexp_array a)
