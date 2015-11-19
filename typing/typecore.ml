@@ -848,6 +848,8 @@ let type_label_a_list ?labels loc closed env type_lbl_a opath lid_a_list k =
           | _ -> assert false)
           lid_a_list
     | _ ->
+        (* Propagate the first record qualifier (module name) which is
+           encountered to other labels which do not have such a qualifier. *)
         let lid_a_list =
           match find_record_qual lid_a_list with
             None -> lid_a_list
@@ -1846,6 +1848,15 @@ let duplicate_ident_types loc caselist env =
 
 (* Typing of expressions *)
 
+(* Used when merging deep labels. *)
+type record_label_kind =
+  | RLKSimple of
+      Longident.t Location.loc * Types.label_description * Parsetree.expression
+  | RLKDeep of
+      Longident.t Location.loc * Types.label_description *
+      (* Invariant: the Longident.t Location.loc list is not empty. *)
+      (Longident.t Location.loc list * Parsetree.expression) list
+
 let unify_exp env exp expected_ty =
   (* Format.eprintf "@[%a@ %a@]@." Printtyp.raw_type_expr exp.exp_type
     Printtyp.raw_type_expr expected_ty; *)
@@ -2187,63 +2198,81 @@ and type_expect_ ?in_function ?(recarg=Rejected) env sexp ty_expected =
             end
         | op -> ty_expected, op
       in
-      (* Type labels and their expression. *)
+
+      (* Type root labels but not their expression yet. *)
       let closed = (opt_sexp = None) in
-      let expand_deep_label lid other_lids exp =
-        match other_lids with
-        | [] ->
-            exp
-        | hd :: _ ->
-            let opt_sexp =
-              match opt_sexp with
-              | None ->
-                  None
-              | Some sexp ->
-                  let sexp =
-                    Ast_helper.Exp.field ~loc: sexp.pexp_loc sexp lid
-                  in
-                  Some sexp
-            in
-            let loc =
-              { exp.pexp_loc with
-                Location.loc_start = hd.loc.Location.loc_start }
-            in
-            Ast_helper.Exp.record_deep ~loc [ other_lids, exp ] opt_sexp
-      in
-      let lbl_exp_list =
-        let lid_lidlexp_list =
+      let lbl_lidlsexp_list =
+        (* Convert to the type expected by [type_label_a_list] by extracting
+           root labels. *)
+        let lid_lidlsexp_list =
           List.map
             (fun (labels, exp) -> List.hd labels, (List.tl labels, exp))
             lidl_sexp_list
         in
         wrap_disambiguate "This record expression is expected to have" ty_record
           (type_label_a_list loc closed env
-             (fun (lid, label, (other_lids, exp)) k ->
-                let exp = expand_deep_label lid other_lids exp in
-                k (type_label_exp true env loc ty_record (lid, label, exp)))
-             opath lid_lidlexp_list)
+             (* typed_label = (lid, label, (deeper_lids, sexp)) *)
+             (fun typed_label k -> k typed_label)
+             opath lid_lidlsexp_list)
           (fun x -> x)
       in
-      (* TODO: merge duplicates if they are deep labels. *)
-      (* TODO: when merging, if all fields are available, remove the "with"
-         if it exists to avoid warning 23 for subrecords. *)
-      (* TODO: remember if the extended expression was used when expanding
-         deep labels, to be able to disable warning 23 if this is the case. *)
+      (* Expand deep labels. *)
+      let lid_sexp_list =
+        (* Merge into a label index table.
+           At the same time, check for duplicate root fields. *)
+        let table: (int, record_label_kind) Hashtbl.t = Hashtbl.create 16 in
+        let add_to_table (lid, label, (deeper_lids, sexp)) =
+          match Hashtbl.find table label.lbl_pos with
+          | exception Not_found ->
+              Hashtbl.add table label.lbl_pos (
+                match deeper_lids with
+                | [] -> RLKSimple (lid, label, sexp)
+                | _ -> RLKDeep (lid, label, [ deeper_lids, sexp ])
+              )
+          | RLKSimple _ ->
+              raise(Error(loc, env, Label_multiply_defined label.lbl_name))
+          | RLKDeep (lid, label, depth) ->
+              Hashtbl.replace table label.lbl_pos (
+                match deeper_lids with
+                | [] ->
+                    raise
+                      (Error(loc, env, Label_multiply_defined label.lbl_name))
+                | _ ->
+                    RLKDeep (lid, label, (deeper_lids, sexp) :: depth)
+              )
+        in
+        List.iter add_to_table lbl_lidlsexp_list;
+        (* Desugar each field. *)
+        let desugar = function
+          | RLKSimple (lid, label, sexp) ->
+              lid, label, sexp
+          | RLKDeep (lid, label, depth) ->
+              let opt_sexp =
+                match opt_sexp with
+                | None ->
+                    None
+                | Some sexp ->
+                    let sexp =
+                      Ast_helper.Exp.field ~loc: sexp.pexp_loc sexp lid
+                    in
+                    Some sexp
+              in
+              let sexp =
+                Ast_helper.Exp.record_deep ~loc depth opt_sexp
+              in
+              lid, label, sexp
+        in
+        Hashtbl.fold (fun _ x acc -> desugar x :: acc) table []
+      in
+      (* Type label values. *)
+      let lbl_exp_list =
+        List.map (type_label_exp true env loc ty_record) lid_sexp_list
+      in
 
       (* Unify the resulting record type with the expected type. *)
       unify_exp_types loc env ty_record (instance env ty_expected);
 
-      (* type_label_a_list returns a list of labels sorted by lbl_pos *)
-      (* note: check_duplicates would better be implemented in
-         type_label_a_list directly *)
-      let rec check_duplicates = function
-        | (_, lbl1, _) :: (_, lbl2, _) :: _ when lbl1.lbl_pos = lbl2.lbl_pos ->
-          raise(Error(loc, env, Label_multiply_defined lbl1.lbl_name))
-        | _ :: rem ->
-            check_duplicates rem
-        | [] -> ()
-      in
-      check_duplicates lbl_exp_list;
+      (* Unify the type of fields which are kept from the original record. *)
       let opt_exp =
         match opt_exp, lbl_exp_list with
           None, _ -> None
